@@ -1,7 +1,7 @@
 services:
   app:
     build:
-      context: ..
+      context: https://github.com/Sim-hu/voice-bot.git#main
       dockerfile: Dockerfile
     init: true
     stop_grace_period: 5s
