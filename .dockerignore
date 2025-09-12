@@ -1,0 +1,18 @@
+# Rust build output
+target
+
+# CLion
+.idea
+
+# Files not required for Docker build
+.git
+.github
+deployment
+deployment_dev
+devtools
+docs
+.gitignore
+docker-compose.yml
+LICENSE
+README.md
+.serena

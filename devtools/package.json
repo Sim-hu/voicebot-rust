@@ -1,0 +1,26 @@
+{
+  "name": "koe",
+  "version": "1.1.1",
+  "private": true,
+  "scripts": {
+    "lint": "prettier --ignore-path=.prettierignore --check .",
+    "fix": "prettier --ignore-path=.prettierignore --write .",
+    "print-next-version": "release-it --release-version",
+    "create-release": "release-it --ci",
+    "generate-docker-tags": "node ./src/generateDockerTags.js",
+    "postinstall": "cd .. && husky install ./devtools/.husky"
+  },
+  "packageManager": "yarn@4.0.1",
+  "dependencies": {
+    "@commitlint/cli": "^18.4.1",
+    "@commitlint/config-conventional": "^18.4.0",
+    "@release-it/conventional-changelog": "^8.0.0",
+    "conventional-changelog-conventionalcommits": "^7.0.2",
+    "husky": "^8.0.3",
+    "release-it": "^17.0.0",
+    "semver": "^7.5.4"
+  },
+  "devDependencies": {
+    "prettier": "^3.0.3"
+  }
+}

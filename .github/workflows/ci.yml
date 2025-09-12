@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['**']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  RUST_VERSION: 1.73.0
+  CARGO_TERM_COLOR: always
+
+jobs:
+  format:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        run: |
+          rustup set profile minimal
+          rustup toolchain install "$RUST_VERSION" --component rustfmt
+          rustup override set "$RUST_VERSION"
+
+      - name: Check code format
+        run: cargo fmt --all -- --check
+
+  lint:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        run: |
+          rustup set profile minimal
+          rustup toolchain install "$RUST_VERSION" --component clippy
+          rustup override set "$RUST_VERSION"
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run lint
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+  check-next-version:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Setup devtools
+        run: yarn install --immutable
+        working-directory: ./devtools
+
+      - name: Check next version
+        run: yarn run print-next-version
+        working-directory: ./devtools
+
+  docker-build-push:
+    needs: [format, lint]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        if: github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build (and push)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          tags: ghcr.io/ciffelia/koe:git-${{ github.sha }}
+          build-args: |
+            SENTRY_RELEASE=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          push: ${{ github.ref == 'refs/heads/main' }}
+
+  sentry-release:
+    if: github.ref == 'refs/heads/main'
+    needs: [docker-build-push]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create Sentry release
+        uses: getsentry/action-release@v1
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+        with:
+          environment: production
