@@ -113,3 +113,16 @@ pub async fn clear_guild_commands(ctx: &Context, guild_id: GuildId) -> Result<()
     info!("Successfully cleared guild commands for guild {}", guild_id);
     Ok(())
 }
+
+pub async fn clear_global_commands(ctx: &Context) -> Result<()> {
+    info!("Clearing global commands");
+    
+    // Clear all global commands by setting an empty list using serde_json::json!
+    ctx.http
+        .create_global_application_commands(&serde_json::json!([]))
+        .await
+        .context("Failed to clear global application commands")?;
+    
+    info!("Successfully cleared global commands");
+    Ok(())
+}

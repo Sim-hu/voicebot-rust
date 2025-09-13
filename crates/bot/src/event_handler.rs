@@ -25,6 +25,14 @@ impl EventHandler for Handler {
         ctx.set_activity(Activity::playing("!vでvcに参加"))
             .await;
 
+        // Clear global commands first
+        if let Err(err) = command::setup::clear_global_commands(&ctx)
+            .await
+            .context("Failed to clear global application commands")
+        {
+            report_error(err);
+        }
+
         // Clear and recreate guild commands
         for guild in &ready.guilds {
             // First clear existing commands

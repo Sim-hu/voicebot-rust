@@ -27,11 +27,7 @@ pub async fn build_read_text(
     );
     let content = improved_text_processing(&content);
 
-    let text = if should_read_author_name(msg, last_msg) {
-        format!("{}。{}", author_name, content)
-    } else {
-        content
-    };
+    let text = content;
 
     let text = replace_words_on_dict(conn, guild_id, &text).await?;
 
