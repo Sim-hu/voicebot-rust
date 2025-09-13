@@ -1,7 +1,6 @@
 # Discord 読み上げBot
 
-指定されたテキストチャンネルに送信されたメッセージをボイスチャンネルで読み上げる Discord Bot です。
-マイクをミュートにしている聞き専メンバーも会話に参加しやすくなります。
+読み上げる Discord Bot です。
 
 ## 特徴
 
@@ -22,8 +21,11 @@
 
 ```bash
 # 起動
-docker compose up
+docker compose up -d
 
 # 停止
 docker compose down
+
+# ログ確認
+docker compose logs -f
 ```

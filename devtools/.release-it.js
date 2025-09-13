@@ -16,7 +16,7 @@ module.exports = {
   github: {
     release: true,
     releaseName: 'v${version}',
-    assets: ['./koe_*.zip'],
+    assets: ['./voicebot_*.zip'],
   },
   plugins: {
     '@release-it/conventional-changelog': {
@@ -28,9 +28,9 @@ module.exports = {
   },
   hooks: {
     'after:bump':
-      "sed -i 's/koe:${latestVersion}/koe:${version}/g' ../deployment/docker-compose.yml",
+      "sed -i 's/voicebot:${latestVersion}/voicebot:${version}/g' ../deployment/docker-compose.yml",
     'before:git:release': 'git add ../deployment/docker-compose.yml',
     'before:github:release':
-      "cp -r ../deployment ./koe && zip -r 'koe_${version}.zip' ./koe && rm -rf ./koe",
+      "cp -r ../deployment ./voicebot && zip -r 'voicebot_${version}.zip' ./voicebot && rm -rf ./voicebot",
   },
 };
