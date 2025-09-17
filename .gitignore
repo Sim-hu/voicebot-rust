@@ -7,3 +7,8 @@
 # CLion
 /.idea
 .serena
+
+# Local environment overrides
+deployment/.env
+.env
+
