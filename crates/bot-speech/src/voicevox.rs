@@ -75,6 +75,39 @@ impl VoicevoxClient {
         Ok(resp)
     }
 
+    pub async fn speakers(&self) -> Result<Vec<Speaker>> {
+        let url = Url::parse(&self.get_endpoint("/speakers"))?;
+
+        let resp = self
+            .client
+            .get(url)
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+
+        Ok(resp)
+    }
+
+    pub async fn generate_query(&self, text: String, speaker: i64) -> Result<String> {
+        let url = Url::parse_with_params(
+            &self.get_endpoint("/audio_query"),
+            &[("text", text), ("speaker", speaker.to_string())],
+        )?;
+
+        let resp = self
+            .client
+            .post(url)
+            .send()
+            .await?
+            .error_for_status()?
+            .text()
+            .await?;
+
+        Ok(resp)
+    }
+
     pub async fn initialize_speaker(&self, speaker_id: i64) -> Result<()> {
         let url = Url::parse_with_params(
             &self.get_endpoint("/initialize_speaker"),
@@ -121,4 +154,17 @@ pub struct Preset {
     pub pre_phoneme_length: f64,
     #[serde(rename = "postPhonemeLength")]
     pub post_phoneme_length: f64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Speaker {
+    pub name: String,
+    pub speaker_uuid: String,
+    pub styles: Vec<SpeakerStyle>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SpeakerStyle {
+    pub id: i64,
+    pub name: String,
 }

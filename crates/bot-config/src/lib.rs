@@ -28,18 +28,24 @@ pub async fn load() -> Result<Config> {
     // Try to load from environment variables first
     if let (Ok(client_id_str), Ok(bot_token), Ok(redis_url)) = (
         std::env::var("DISCORD_CLIENT_ID"),
-        std::env::var("DISCORD_BOT_TOKEN"), 
-        std::env::var("REDIS_URL")
+        std::env::var("DISCORD_BOT_TOKEN"),
+        std::env::var("REDIS_URL"),
     ) {
-        let client_id = client_id_str.parse::<u64>()
+        let client_id = client_id_str
+            .parse::<u64>()
             .context("Failed to parse DISCORD_CLIENT_ID as u64")?;
-        
+
         let voicevox_api_base = std::env::var("VOICEVOX_API_BASE")
             .unwrap_or_else(|_| "http://voicevox:50021".to_string());
 
         return Ok(Config {
-            discord: DiscordConfig { client_id, bot_token },
-            voicevox: VoicevoxConfig { api_base: voicevox_api_base },
+            discord: DiscordConfig {
+                client_id,
+                bot_token,
+            },
+            voicevox: VoicevoxConfig {
+                api_base: voicevox_api_base,
+            },
             redis: RedisConfig { url: redis_url },
         });
     }

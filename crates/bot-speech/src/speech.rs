@@ -19,6 +19,10 @@ pub async fn make_speech(client: &VoicevoxClient, option: SpeechRequest) -> Resu
             text: option.text,
         })
         .await?;
+    // override speed to 1.3
+    let mut v: serde_json::Value = serde_json::from_str(&query)?;
+    v["speedScale"] = serde_json::json!(1.3);
+    let query = serde_json::to_string(&v)?;
 
     let audio = client
         .synthesis(SynthesisParams {
@@ -78,4 +82,31 @@ impl From<&PresetId> for i64 {
     fn from(x: &PresetId) -> Self {
         x.0
     }
+}
+
+pub async fn list_style_ids(client: &VoicevoxClient) -> Result<Vec<i64>> {
+    let speakers = client.speakers().await?;
+    let mut ids = Vec::new();
+    for sp in speakers {
+        for st in sp.styles {
+            ids.push(st.id);
+        }
+    }
+    Ok(ids)
+}
+
+pub async fn make_speech_by_style(
+    client: &VoicevoxClient,
+    text: String,
+    style_id: i64,
+) -> Result<EncodedAudio> {
+    let query = client.generate_query(text, style_id).await?;
+    // override speed to 1.3
+    let mut v: serde_json::Value = serde_json::from_str(&query)?;
+    v["speedScale"] = serde_json::json!(1.3);
+    let query = serde_json::to_string(&v)?;
+    let audio = client
+        .synthesis(SynthesisParams { style_id, query })
+        .await?;
+    Ok(audio)
 }

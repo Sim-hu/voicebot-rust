@@ -1,341 +1,383 @@
-use super::{
-    model::{Command, DictAddOption, DictRemoveOption, TimeChannelOption},
-    parser::parse,
+use crate::app_state::AppState;
+use crate::command::actions;
+use crate::command::actions::VoiceToggleOutcome;
+use anyhow::{anyhow, Result};
+use bot_db::dict;
+use serde_json::Value;
+use serenity::builder::CreateEmbed;
+use serenity::client::Context as SerenityContext;
+use serenity::model::application::interaction::application_command::{
+    ApplicationCommandInteraction, CommandDataOption,
 };
-use crate::{app_state, component_interaction::custom_id};
-use anyhow::{anyhow, bail, Context as _, Result};
-use bot_db::{
-    dict::{GetAllOption, InsertOption, InsertResponse, RemoveOption, RemoveResponse},
-    voice::GetOption,
-};
-use rand::seq::SliceRandom;
-use serenity::{
-    builder::{
-        CreateActionRow, CreateComponents, CreateEmbed, CreateSelectMenu, CreateSelectMenuOption,
-    },
-    client::Context,
-    model::{
-        application::interaction::{
-            application_command::ApplicationCommandInteraction, InteractionResponseType,
-            MessageFlags,
-        },
-        id::{ChannelId, GuildId, UserId},
-    },
-};
+use serenity::model::application::interaction::autocomplete::AutocompleteInteraction;
+use serenity::model::application::interaction::InteractionResponseType;
 
-pub async fn handle(ctx: &Context, cmd: &ApplicationCommandInteraction) -> Result<()> {
-    match parse(cmd) {
-        Command::VoiceToggle => handle_voice_toggle(ctx, cmd)
-            .await
-            .context("Failed to execute /v")?,
-        Command::Skip => handle_skip(ctx, cmd)
-            .await
-            .context("Failed to execute /skip")?,
-        Command::DictAdd(option) => handle_dict_add(ctx, cmd, option)
-            .await
-            .context("Failed to execute /dict add")?,
-        Command::DictRemove(option) => handle_dict_remove(ctx, cmd, option)
-            .await
-            .context("Failed to execute /dict remove")?,
-        Command::DictList => handle_dict_list(ctx, cmd)
-            .await
-            .context("Failed to execute /dict list")?,
-        Command::Help => handle_help(ctx, cmd)
-            .await
-            .context("Failed to execute /help")?,
-        Command::TimeToggle => handle_time_toggle(ctx, cmd)
-            .await
-            .context("Failed to execute /time")?,
-        Command::TimeChannel(option) => handle_time_channel(ctx, cmd, option)
-            .await
-            .context("Failed to execute /time channel")?,
-        Command::Unknown => {
-            bail!("Unknown command: {:?}", cmd);
-        }
-    };
-
-    Ok(())
-}
-
-async fn handle_voice_toggle(ctx: &Context, cmd: &ApplicationCommandInteraction) -> Result<()> {
-    let guild_id = match cmd.guild_id {
-        Some(id) => id,
-        None => {
-            r(ctx, cmd, "`/v` はサーバー内でのみ使えます。").await?;
-            return Ok(());
-        }
-    };
-
-    if bot_call::is_connected(ctx, guild_id).await? {
-        // Leave voice channel
-        bot_call::leave(ctx, guild_id).await?;
-        let state = app_state::get(ctx).await?;
-        state.connected_guild_states.remove(&guild_id);
-        r(ctx, cmd, "ボイスチャンネルから退出しました。").await?;
-    } else {
-        // Join voice channel
-        let user_id = cmd.user.id;
-        let text_channel_id = cmd.channel_id;
-
-        let voice_channel_id = match get_user_voice_channel(ctx, &guild_id, &user_id)? {
-            Some(channel) => channel,
-            None => {
-                r(ctx, cmd, "まずボイスチャンネルに参加してください。").await?;
-                return Ok(());
-            }
-        };
-
-        bot_call::join_deaf(ctx, guild_id, voice_channel_id).await?;
-
-        let state = app_state::get(ctx).await?;
-        state.connected_guild_states.insert(
-            guild_id,
-            app_state::ConnectedGuildState {
-                bound_text_channel: text_channel_id,
-                last_message_read: None,
-            },
-        );
-
-        r(ctx, cmd, "ボイスチャンネルに参加しました。").await?;
+pub async fn handle(
+    ctx: &SerenityContext,
+    interaction: &ApplicationCommandInteraction,
+    state: &AppState,
+) -> Result<()> {
+    match interaction.data.name.as_str() {
+        "v" => handle_voice(ctx, interaction, state).await?,
+        "s" => handle_skip(ctx, interaction, state).await?,
+        "time" => handle_time(ctx, interaction, state).await?,
+        "dict" => handle_dict(ctx, interaction, state).await?,
+        "help" => handle_help(ctx, interaction).await?,
+        _ => respond_text(ctx, interaction, "未対応のコマンドです。").await?,
     }
 
     Ok(())
 }
 
-async fn handle_time_toggle(ctx: &Context, cmd: &ApplicationCommandInteraction) -> Result<()> {
-    let guild_id = match cmd.guild_id {
-        Some(id) => id,
-        None => {
-            r(ctx, cmd, "`/time toggle` はサーバー内でのみ使えます。").await?;
-            return Ok(());
-        }
+pub async fn handle_autocomplete(
+    ctx: &SerenityContext,
+    interaction: &AutocompleteInteraction,
+    state: &AppState,
+) -> Result<()> {
+    if interaction.data.name != "dict" {
+        return Ok(());
+    }
+
+    let Some(guild_id) = interaction.guild_id else {
+        return Ok(());
     };
 
-    let enabled = crate::time_signal::toggle_time_signal_for_guild(guild_id.into()).await;
-    let status = if enabled { "有効" } else { "無効" };
-    r(ctx, cmd, format!("時報機能を{}にしました。毎時0分に時刻をお知らせします。", status)).await?;
+    let Some(option) = find_focused_option(&interaction.data.options) else {
+        return Ok(());
+    };
+
+    let query = option.value.as_ref().and_then(Value::as_str).unwrap_or("");
+
+    let mut words = match actions::dict_words(state, guild_id).await {
+        Ok(words) => words,
+        Err(_) => Vec::new(),
+    };
+    words.sort();
+
+    let lower_query = query.to_lowercase();
+    let suggestions = words
+        .into_iter()
+        .filter(|word| lower_query.is_empty() || word.to_lowercase().contains(&lower_query))
+        .take(25)
+        .collect::<Vec<_>>();
+
+    interaction
+        .create_autocomplete_response(&ctx.http, |response| {
+            for word in &suggestions {
+                response.add_string_choice(word, word.clone());
+            }
+            response
+        })
+        .await?;
+
     Ok(())
 }
 
-async fn handle_time_channel(ctx: &Context, cmd: &ApplicationCommandInteraction, option: TimeChannelOption) -> Result<()> {
-    let guild_id = match cmd.guild_id {
-        Some(id) => id,
-        None => {
-            r(ctx, cmd, "`/time channel` はサーバー内でのみ使えます。").await?;
-            return Ok(());
-        }
+async fn handle_voice(
+    ctx: &SerenityContext,
+    interaction: &ApplicationCommandInteraction,
+    state: &AppState,
+) -> Result<()> {
+    let Some(guild_id) = interaction.guild_id else {
+        respond_text(
+            ctx,
+            interaction,
+            "このコマンドはサーバー内で使用してください。",
+        )
+        .await?;
+        return Ok(());
     };
 
-    // TODO: Store the time signal channel in database
-    // For now, just respond that the feature will be implemented
-    let channel_mention = format!("<#{}>", option.channel_id);
-    r(ctx, cmd, format!("時報の出力チャンネルを{}に設定しました。", channel_mention)).await?;
+    let outcome = actions::toggle_voice(
+        ctx,
+        state,
+        guild_id,
+        interaction.user.id,
+        interaction.channel_id,
+    )
+    .await?;
+
+    match outcome {
+        VoiceToggleOutcome::Joined { voice_channel } => {
+            respond_text(
+                ctx,
+                interaction,
+                &format!("<#{}> に参加しました。", voice_channel),
+            )
+            .await?
+        }
+        VoiceToggleOutcome::Left => {
+            respond_text(ctx, interaction, "ボイスチャンネルから退出しました。").await?
+        }
+        VoiceToggleOutcome::MissingUserChannel => {
+            respond_text(
+                ctx,
+                interaction,
+                "まずボイスチャンネルに参加してから実行してください。",
+            )
+            .await?
+        }
+    }
+
     Ok(())
 }
 
-async fn handle_skip(ctx: &Context, cmd: &ApplicationCommandInteraction) -> Result<()> {
-    let guild_id = match cmd.guild_id {
-        Some(id) => id,
-        None => {
-            r(ctx, cmd, "`/skip` はサーバー内でのみ使えます。").await?;
-            return Ok(());
-        }
+async fn handle_skip(
+    ctx: &SerenityContext,
+    interaction: &ApplicationCommandInteraction,
+    _state: &AppState,
+) -> Result<()> {
+    let Some(guild_id) = interaction.guild_id else {
+        respond_text(
+            ctx,
+            interaction,
+            "このコマンドはサーバー内で使用してください。",
+        )
+        .await?;
+        return Ok(());
     };
 
     if !bot_call::is_connected(ctx, guild_id).await? {
-        {
-            r(ctx, cmd, "どのボイスチャンネルにも接続していません。").await?;
-            return Ok(());
-        };
+        respond_text(ctx, interaction, "再生中の読み上げはありません。").await?;
+        return Ok(());
     }
 
-    bot_call::skip(ctx, guild_id).await?;
-
-    r(ctx, cmd, "読み上げ中のメッセージをスキップしました。").await?;
+    actions::skip_current_track(ctx, guild_id).await?;
+    respond_text(ctx, interaction, "再生中の読み上げをスキップしました。").await?;
     Ok(())
 }
 
-
-async fn handle_dict_add(
-    ctx: &Context,
-    cmd: &ApplicationCommandInteraction,
-    option: DictAddOption,
+async fn handle_time(
+    ctx: &SerenityContext,
+    interaction: &ApplicationCommandInteraction,
+    state: &AppState,
 ) -> Result<()> {
-    let guild_id = match cmd.guild_id {
-        Some(id) => id,
-        None => {
-            r(ctx, cmd, "`/dict add` はサーバー内でのみ使えます。").await?;
-            return Ok(());
+    let Some(guild_id) = interaction.guild_id else {
+        respond_text(
+            ctx,
+            interaction,
+            "このコマンドはサーバー内で使用してください。",
+        )
+        .await?;
+        return Ok(());
+    };
+
+    let subcommand = interaction
+        .data
+        .options
+        .first()
+        .map(|option| option.name.as_str())
+        .unwrap_or("toggle");
+
+    match subcommand {
+        "toggle" => {
+            let enabled = actions::toggle_time_signal(state, guild_id).await;
+            let status = if enabled { "ON" } else { "OFF" };
+            respond_text(
+                ctx,
+                interaction,
+                &format!("時報を{}に切り替えました。", status),
+            )
+            .await?
         }
-    };
+        "audio_set" => {
+            let Some(option) = interaction.data.options.first() else {
+                respond_text(ctx, interaction, "URL を指定してください。").await?;
+                return Ok(());
+            };
+            let Some(url_option) = option.options.first() else {
+                respond_text(ctx, interaction, "URL を指定してください。").await?;
+                return Ok(());
+            };
+            let Some(url) = url_option.value.as_ref().and_then(Value::as_str) else {
+                respond_text(ctx, interaction, "不正な URL です。").await?;
+                return Ok(());
+            };
 
-    let state = app_state::get(ctx).await?;
-    let mut conn = state.redis_client.get_async_connection().await?;
+            match actions::set_time_signal_audio(state, guild_id, url).await {
+                Ok(()) => respond_text(ctx, interaction, "時報の音声URLを更新しました。").await?,
+                Err(err) => {
+                    respond_text(
+                        ctx,
+                        interaction,
+                        &format!("音声の設定に失敗しました: {}", err),
+                    )
+                    .await?
+                }
+            }
+        }
+        "audio_clear" => {
+            actions::clear_time_signal_audio(state, guild_id);
+            respond_text(ctx, interaction, "時報の音声設定を削除しました。").await?
+        }
+        _ => respond_text(ctx, interaction, "未対応のサブコマンドです。").await?,
+    }
 
-    let resp = bot_db::dict::insert(
-        &mut conn,
-        InsertOption {
-            guild_id: guild_id.into(),
-            word: option.word.clone(),
-            read_as: option.read_as.clone(),
-        },
-    )
-    .await?;
-
-    let msg = match resp {
-        InsertResponse::Success => format!(
-            "{}の読み方を{}として辞書に登録しました。",
-            sanitize_response(&option.word),
-            sanitize_response(&option.read_as)
-        ),
-        InsertResponse::WordAlreadyExists => format!(
-            "すでに{}は辞書に登録されています。",
-            sanitize_response(&option.word)
-        ),
-    };
-    r(ctx, cmd, msg).await?;
     Ok(())
 }
 
-async fn handle_dict_remove(
-    ctx: &Context,
-    cmd: &ApplicationCommandInteraction,
-    option: DictRemoveOption,
+async fn handle_autojoin(
+    ctx: &SerenityContext,
+    interaction: &ApplicationCommandInteraction,
 ) -> Result<()> {
-    let guild_id = match cmd.guild_id {
-        Some(id) => id,
-        None => {
-            r(ctx, cmd, "`/dict remove` はサーバー内でのみ使えます。").await?;
-            return Ok(());
-        }
+    let Some(guild_id) = interaction.guild_id else {
+        respond_text(
+            ctx,
+            interaction,
+            "このコマンドはサーバー内で使用してください。",
+        )
+        .await?;
+        return Ok(());
     };
 
-    let state = app_state::get(ctx).await?;
-    let mut conn = state.redis_client.get_async_connection().await?;
-
-    let resp = bot_db::dict::remove(
-        &mut conn,
-        RemoveOption {
-            guild_id: guild_id.into(),
-            word: option.word.clone(),
-        },
+    let enabled = actions::toggle_autojoin(guild_id).await;
+    let status = if enabled { "ON" } else { "OFF" };
+    respond_text(
+        ctx,
+        interaction,
+        &format!("Autojoin を {} に切り替えました。", status),
     )
     .await?;
-
-    let msg = match resp {
-        RemoveResponse::Success => format!(
-            "辞書から{}を削除しました。",
-            sanitize_response(&option.word)
-        ),
-        RemoveResponse::WordDoesNotExist => format!(
-            "{}は辞書に登録されていません。",
-            sanitize_response(&option.word)
-        ),
-    };
-    r(ctx, cmd, msg).await?;
     Ok(())
 }
 
-async fn handle_dict_list(ctx: &Context, cmd: &ApplicationCommandInteraction) -> Result<()> {
-    let guild_id = match cmd.guild_id {
-        Some(id) => id,
-        None => {
-            r(ctx, cmd, "`/dict list` はサーバー内でのみ使えます。").await?;
-            return Ok(());
-        }
+async fn handle_dict(
+    ctx: &SerenityContext,
+    interaction: &ApplicationCommandInteraction,
+    state: &AppState,
+) -> Result<()> {
+    let Some(guild_id) = interaction.guild_id else {
+        respond_text(
+            ctx,
+            interaction,
+            "このコマンドはサーバー内で使用してください。",
+        )
+        .await?;
+        return Ok(());
     };
 
-    let state = app_state::get(ctx).await?;
-    let mut conn = state.redis_client.get_async_connection().await?;
+    let Some(subcommand) = interaction.data.options.first() else {
+        respond_text(ctx, interaction, "サブコマンドを指定してください。").await?;
+        return Ok(());
+    };
 
-    let dict = bot_db::dict::get_all(
-        &mut conn,
-        GetAllOption {
-            guild_id: guild_id.into(),
-        },
-    )
-    .await?;
+    match subcommand.name.as_str() {
+        "add" => {
+            let word = extract_string_option(subcommand, "word")?;
+            let read_as = extract_string_option(subcommand, "read_as")?;
 
-    {
-        let mut embed = CreateEmbed::default();
+            match actions::dict_add(state, guild_id, &word, &read_as).await? {
+                dict::InsertResponse::Success => {
+                    respond_text(
+                        ctx,
+                        interaction,
+                        &format!("辞書に登録しました: {} → {}", word, read_as),
+                    )
+                    .await?
+                }
+                dict::InsertResponse::WordAlreadyExists => {
+                    respond_text(
+                        ctx,
+                        interaction,
+                        "すでに登録済みです。上書きする場合はいったん削除してください。",
+                    )
+                    .await?
+                }
+            }
+        }
+        "remove" => {
+            let word = extract_string_option(subcommand, "word")?;
+            match actions::dict_remove(state, guild_id, &word).await? {
+                dict::RemoveResponse::Success => {
+                    respond_text(ctx, interaction, &format!("辞書から削除しました: {}", word))
+                        .await?
+                }
+                dict::RemoveResponse::WordDoesNotExist => {
+                    respond_text(ctx, interaction, "指定された単語は登録されていません。").await?
+                }
+            }
+        }
+        "list" => {
+            let json = actions::dict_list(state, guild_id).await?;
+            if json.len() <= 1900 {
+                respond_text(ctx, interaction, &format!("```json\n{}\n```", json)).await?
+            } else {
+                respond_text(
+                    ctx,
+                    interaction,
+                    "件数が多すぎるため表示できません。登録内容を絞ってください。",
+                )
+                .await?
+            }
+        }
+        _ => respond_text(ctx, interaction, "未対応のサブコマンドです。").await?,
+    }
 
-        let guild_name = guild_id
-            .name(&ctx.cache)
-            .unwrap_or_else(|| "サーバー".to_string());
-        embed.title(format!("📕 {}の辞書", guild_name));
+    Ok(())
+}
 
-        embed.fields(
-            dict.into_iter()
-                .map(|(word, read_as)| (word, sanitize_response(&read_as), false)),
-        );
+async fn handle_help(
+    ctx: &SerenityContext,
+    interaction: &ApplicationCommandInteraction,
+) -> Result<()> {
+    let embed = actions::build_help_embed();
+    respond_embed(ctx, interaction, embed).await
+}
 
-        cmd.create_interaction_response(&ctx.http, |create_response| {
-            create_response
+fn extract_string_option(option: &CommandDataOption, name: &str) -> Result<String> {
+    option
+        .options
+        .iter()
+        .find(|opt| opt.name == name)
+        .and_then(|opt| opt.value.as_ref())
+        .and_then(Value::as_str)
+        .map(|s| s.to_string())
+        .ok_or_else(|| anyhow!("Missing required option: {}", name))
+}
+
+fn find_focused_option<'a>(options: &'a [CommandDataOption]) -> Option<&'a CommandDataOption> {
+    for option in options {
+        if option.focused {
+            return Some(option);
+        }
+
+        if let Some(inner) = find_focused_option(&option.options) {
+            return Some(inner);
+        }
+    }
+
+    None
+}
+
+async fn respond_text(
+    ctx: &SerenityContext,
+    interaction: &ApplicationCommandInteraction,
+    content: impl AsRef<str>,
+) -> Result<()> {
+    interaction
+        .create_interaction_response(&ctx.http, |response| {
+            response
                 .kind(InteractionResponseType::ChannelMessageWithSource)
-                .interaction_response_data(|create_message| create_message.add_embed(embed))
+                .interaction_response_data(|message| message.content(content.as_ref()))
         })
-        .await
-        .context("Failed to create interaction response")?;
-    };
-
+        .await?;
     Ok(())
 }
 
-async fn handle_help(ctx: &Context, cmd: &ApplicationCommandInteraction) -> Result<()> {
-    let help_message = r#"**🎤 あすとら - Discord読み上げBot**
-
-**基本的な使い方:**
-• `/v` または `!v` - ボイスチャンネルに参加/退出
-• `/skip` または `!s` - 読み上げ中のメッセージをスキップ
-• `/time toggle` - 時報機能のON/OFF切り替え
-• `/time channel` - 時報の出力チャンネル設定
-
-**辞書機能:**
-• `/dict add <語句> <読み方>` - 読み方を辞書に追加
-• `/dict remove <語句>` - 辞書から削除
-• `/dict list` - 辞書一覧を表示
-
-**ご利用方法:**
-1. あなたがボイスチャンネルに参加
-2. `/v` または `!v` でボットを呼び出し
-3. テキストチャンネルでメッセージを送信すると読み上げます
-
-ステータス: !vでvcに参加"#;
-    
-    r(ctx, cmd, help_message).await?;
+async fn respond_embed(
+    ctx: &SerenityContext,
+    interaction: &ApplicationCommandInteraction,
+    embed: CreateEmbed,
+) -> Result<()> {
+    interaction
+        .create_interaction_response(&ctx.http, |response| {
+            response
+                .kind(InteractionResponseType::ChannelMessageWithSource)
+                .interaction_response_data(|message| {
+                    message.add_embed(embed.clone());
+                    message
+                })
+        })
+        .await?;
     Ok(())
-}
-
-fn get_user_voice_channel(
-    ctx: &Context,
-    guild_id: &GuildId,
-    user_id: &UserId,
-) -> Result<Option<ChannelId>> {
-    let guild = guild_id
-        .to_guild_cached(&ctx.cache)
-        .context("Failed to find guild in the cache")?;
-
-    let channel_id = guild
-        .voice_states
-        .get(user_id)
-        .and_then(|voice_state| voice_state.channel_id);
-
-    Ok(channel_id)
-}
-
-// Helper function to create text message response
-async fn r(ctx: &Context, cmd: &ApplicationCommandInteraction, text: impl ToString) -> Result<()> {
-    cmd.create_interaction_response(&ctx.http, |create_response| {
-        create_response
-            .kind(InteractionResponseType::ChannelMessageWithSource)
-            .interaction_response_data(|create_message| create_message.content(text))
-    })
-    .await
-    .context("Failed to create interaction response")?;
-
-    Ok(())
-}
-
-fn sanitize_response(text: &str) -> String {
-    format!("`{}`", text.replace('`', ""))
 }

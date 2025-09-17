@@ -1,110 +1,94 @@
-use crate::error::report_error;
-use crate::{command, voice_state};
-use crate::{component_interaction, message};
-use anyhow::Context as _;
-use log::info;
+use crate::app_state;
+use crate::component_interaction;
+use crate::message;
+use crate::time_signal;
+use crate::voice_state;
+use once_cell::sync::OnceCell;
 use serenity::{
     async_trait,
-    client::{Context, EventHandler},
+    client::{Context as SerenityContext, EventHandler},
     model::{
         application::interaction::Interaction,
         channel::Message,
         gateway::{Activity, Ready},
-        guild::Guild,
         voice::VoiceState,
     },
 };
 
+static COMMANDS_INITIALIZED: OnceCell<()> = OnceCell::new();
+
+#[derive(Default)]
 pub struct Handler;
 
 #[async_trait]
 impl EventHandler for Handler {
-    async fn ready(&self, ctx: Context, ready: Ready) {
-        info!("Connected as {}", ready.user.name);
+    async fn ready(&self, ctx: SerenityContext, ready: Ready) {
+        println!("Bot is ready! Logged in as {}", ready.user.name);
 
-        ctx.set_activity(Activity::playing("!vでvcに参加"))
-            .await;
+        let activity = Activity::playing("!vか/vでVCに参加");
+        ctx.set_activity(activity).await;
 
-        // Clear global commands first
-        if let Err(err) = command::setup::clear_global_commands(&ctx)
-            .await
-            .context("Failed to clear global application commands")
-        {
-            report_error(err);
+        if COMMANDS_INITIALIZED.set(()).is_ok() {
+            if let Err(e) = crate::command::setup::setup_commands(&ctx).await {
+                eprintln!("Failed to setup slash commands: {}", e);
+            }
         }
 
-        // Clear and recreate guild commands
         for guild in &ready.guilds {
-            // First clear existing commands
-            if let Err(err) = command::setup::clear_guild_commands(&ctx, guild.id)
+            if let Err(e) = guild
+                .id
+                .set_application_commands(&ctx.http, |commands| commands)
                 .await
-                .context("Failed to clear guild application commands")
             {
-                report_error(err);
+                eprintln!("Failed to clear guild commands ({}): {}", guild.id, e);
             }
-            
-            // Then set up new commands
-            if let Err(err) = command::setup::setup_guild_commands(&ctx, guild.id)
-                .await
-                .context("Failed to set guild application commands")
-            {
-                report_error(err);
-            }
+        }
+
+        time_signal::spawn_service(ctx.clone());
+    }
+
+    async fn message(&self, ctx: SerenityContext, msg: Message) {
+        if let Err(e) = message::handler::handle(&ctx, msg).await {
+            eprintln!("Error handling message: {}", e);
         }
     }
 
-    async fn guild_create(&self, ctx: Context, guild: Guild, _is_new: bool) {
-        if let Err(err) = command::setup::setup_guild_commands(&ctx, guild.id)
-            .await
-            .context("Failed to set guild application commands")
-        {
-            report_error(err);
-        }
-    }
+    async fn interaction_create(&self, ctx: SerenityContext, interaction: Interaction) {
+        let state = match app_state::get(&ctx).await {
+            Ok(state) => state,
+            Err(_) => return,
+        };
 
-    async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
         match interaction {
             Interaction::ApplicationCommand(command) => {
-                if let Err(err) = command::handler::handle(&ctx, &command)
-                    .await
-                    .context("Failed to respond to slash command")
-                {
-                    report_error(err);
+                if let Err(e) = crate::command::handler::handle(&ctx, &command, &state).await {
+                    eprintln!("Error handling application command: {}", e);
                 }
             }
-            Interaction::MessageComponent(component_interaction) => {
-                if let Err(err) =
-                    component_interaction::handler::handle(&ctx, &component_interaction)
-                        .await
-                        .context("Failed to respond to message components interaction")
+            Interaction::Autocomplete(autocomplete) => {
+                if let Err(e) =
+                    crate::command::handler::handle_autocomplete(&ctx, &autocomplete, &state).await
                 {
-                    report_error(err);
+                    eprintln!("Error handling autocomplete interaction: {}", e);
+                }
+            }
+            Interaction::MessageComponent(component) => {
+                if let Err(e) = component_interaction::handler::handle(&ctx, &component).await {
+                    eprintln!("Error handling component interaction: {}", e);
                 }
             }
             _ => {}
-        };
-    }
-
-    async fn message(&self, ctx: Context, msg: Message) {
-        if let Err(err) = message::handler::handle(&ctx, msg)
-            .await
-            .context("Failed to handle message")
-        {
-            report_error(err);
         }
     }
 
     async fn voice_state_update(
         &self,
-        ctx: Context,
-        _old_voice_state: Option<VoiceState>,
-        new_voice_state: VoiceState,
+        ctx: SerenityContext,
+        _old: Option<VoiceState>,
+        new: VoiceState,
     ) {
-        if let Err(err) = voice_state::handler::handle_update(&ctx, new_voice_state.guild_id)
-            .await
-            .context("Failed to handle voice state update")
-        {
-            report_error(err);
+        if let Err(e) = voice_state::handler::handle_update(&ctx, new.guild_id).await {
+            eprintln!("Error handling voice state update: {}", e);
         }
     }
 }

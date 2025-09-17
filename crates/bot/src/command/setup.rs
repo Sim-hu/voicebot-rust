@@ -1,128 +1,107 @@
-use anyhow::{Context as _, Result};
-use log::info;
-use serenity::{
-    client::Context,
-    model::{application::command::CommandOptionType, id::GuildId},
-};
+use anyhow::Result;
+use serenity::client::Context;
+use serenity::model::application::command::{Command, CommandOptionType};
 
-pub async fn setup_guild_commands(ctx: &Context, guild_id: GuildId) -> Result<()> {
-    info!("Setting up guild commands for guild {}", guild_id);
-    
-    // Clear existing commands and set new ones
-    guild_id
-        .set_application_commands(&ctx.http, |commands| {
-            commands
-                .create_application_command(|command| {
-                    command.name("help").description("使い方を表示")
-                })
-                .create_application_command(|command| {
-                    command
-                        .name("v")
-                        .description("ボイスチャンネル参加/退出を切り替え")
-                })
-                .create_application_command(|command| {
-                    command
-                        .name("time")
-                        .description("時報機能の設定")
-                        .create_option(|option| {
-                            option
-                                .name("toggle")
-                                .description("時報機能のON/OFFを切り替え")
-                                .kind(CommandOptionType::SubCommand)
-                        })
-                        .create_option(|option| {
-                            option
-                                .name("channel")
-                                .description("時報の出力チャンネルを設定")
-                                .kind(CommandOptionType::SubCommand)
-                                .create_sub_option(|option| {
-                                    option
-                                        .name("channel")
-                                        .description("時報を出力するチャンネル")
-                                        .kind(CommandOptionType::Channel)
-                                        .required(true)
-                                })
-                        })
-                })
-                .create_application_command(|command| {
-                    command
-                        .name("skip")
-                        .description("読み上げ中のメッセージをスキップ")
-                })
-                .create_application_command(|command| {
-                    command
-                        .name("dict")
-                        .description("読み上げ辞書の閲覧と編集")
-                        .create_option(|option| {
-                            option
-                                .name("add")
-                                .description("辞書に項目を追加")
-                                .kind(CommandOptionType::SubCommand)
-                                .create_sub_option(|option| {
-                                    option
-                                        .name("word")
-                                        .description("読み方を指定したい語句")
-                                        .kind(CommandOptionType::String)
-                                        .required(true)
-                                })
-                                .create_sub_option(|option| {
-                                    option
-                                        .name("read-as")
-                                        .description("語句の読み方")
-                                        .kind(CommandOptionType::String)
-                                        .required(true)
-                                })
-                        })
-                        .create_option(|option| {
-                            option
-                                .name("remove")
-                                .description("辞書から項目を削除")
-                                .kind(CommandOptionType::SubCommand)
-                                .create_sub_option(|option| {
-                                    option
-                                        .name("word")
-                                        .description("削除したい語句")
-                                        .kind(CommandOptionType::String)
-                                        .required(true)
-                                })
-                        })
-                        .create_option(|option| {
-                            option
-                                .name("list")
-                                .description("辞書を表示")
-                                .kind(CommandOptionType::SubCommand)
-                        })
-                })
-        })
-        .await
-        .context("Failed to set guild application commands")?;
+pub async fn setup_commands(ctx: &Context) -> Result<()> {
+    Command::set_global_application_commands(&ctx.http, |commands| {
+        commands
+            .create_application_command(|command| {
+                command
+                    .name("v")
+                    .description("ボイスチャンネルへの参加／退出を切り替えます。")
+            })
+            .create_application_command(|command| {
+                command
+                    .name("s")
+                    .description("現在再生中の読み上げをスキップします。")
+            })
+            .create_application_command(|command| {
+                command
+                    .name("time")
+                    .description("時報機能を設定します。")
+                    .create_option(|option| {
+                        option
+                            .name("toggle")
+                            .description("時報のON/OFFを切り替えます。")
+                            .kind(CommandOptionType::SubCommand)
+                    })
+                    .create_option(|option| {
+                        option
+                            .name("audio_set")
+                            .description("時報で再生する音声ファイルのURLを設定します。")
+                            .kind(CommandOptionType::SubCommand)
+                            .create_sub_option(|sub_option| {
+                                sub_option
+                                    .name("url")
+                                    .description("音声ファイルのURL (MP3/WAVなど)")
+                                    .kind(CommandOptionType::String)
+                                    .required(true)
+                            })
+                    })
+                    .create_option(|option| {
+                        option
+                            .name("audio_clear")
+                            .description("設定済みの時報音声を解除します。")
+                            .kind(CommandOptionType::SubCommand)
+                    })
+            })
+            .create_application_command(|command| {
+                command.name("autojoin").description(
+                    "ユーザーのVC参加を検知してBotを自動参加させる機能を切り替えます。",
+                )
+            })
+            .create_application_command(|command| {
+                command
+                    .name("dict")
+                    .description("読み替え辞書を管理します。")
+                    .create_option(|option| {
+                        option
+                            .name("add")
+                            .description("読み替えを追加します。")
+                            .kind(CommandOptionType::SubCommand)
+                            .create_sub_option(|sub_option| {
+                                sub_option
+                                    .name("word")
+                                    .description("読み替え対象の単語")
+                                    .kind(CommandOptionType::String)
+                                    .required(true)
+                            })
+                            .create_sub_option(|sub_option| {
+                                sub_option
+                                    .name("read_as")
+                                    .description("読み上げる際の読み仮名")
+                                    .kind(CommandOptionType::String)
+                                    .required(true)
+                            })
+                    })
+                    .create_option(|option| {
+                        option
+                            .name("remove")
+                            .description("登録済みの読み替えを削除します。")
+                            .kind(CommandOptionType::SubCommand)
+                            .create_sub_option(|sub_option| {
+                                sub_option
+                                    .name("word")
+                                    .description("削除する単語")
+                                    .kind(CommandOptionType::String)
+                                    .required(true)
+                                    .set_autocomplete(true)
+                            })
+                    })
+                    .create_option(|option| {
+                        option
+                            .name("list")
+                            .description("登録済みの読み替え一覧を表示します。")
+                            .kind(CommandOptionType::SubCommand)
+                    })
+            })
+            .create_application_command(|command| {
+                command
+                    .name("help")
+                    .description("使い方のヘルプを表示します。")
+            })
+    })
+    .await?;
 
-    info!("Successfully set up commands for guild {}", guild_id);
-    Ok(())
-}
-
-pub async fn clear_guild_commands(ctx: &Context, guild_id: GuildId) -> Result<()> {
-    info!("Clearing guild commands for guild {}", guild_id);
-    
-    // Clear all guild commands by setting an empty list
-    guild_id
-        .set_application_commands(&ctx.http, |commands| commands)
-        .await
-        .context("Failed to clear guild application commands")?;
-    
-    info!("Successfully cleared guild commands for guild {}", guild_id);
-    Ok(())
-}
-
-pub async fn clear_global_commands(ctx: &Context) -> Result<()> {
-    info!("Clearing global commands");
-    
-    // Clear all global commands by setting an empty list using serde_json::json!
-    ctx.http
-        .create_global_application_commands(&serde_json::json!([]))
-        .await
-        .context("Failed to clear global application commands")?;
-    
-    info!("Successfully cleared global commands");
     Ok(())
 }

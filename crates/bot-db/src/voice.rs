@@ -34,7 +34,8 @@ pub struct SetOption {
 /// ユーザーの声を設定する
 pub async fn set(connection: &mut Connection, option: SetOption) -> Result<()> {
     let key = voice_key(option.guild_id, option.user_id);
-    connection.set(&key, option.value).await?;
+    // Explicitly specify return type to avoid never type fallback warning
+    let _: () = connection.set(&key, option.value).await?;
     Ok(())
 }
 

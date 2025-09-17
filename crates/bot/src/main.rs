@@ -1,8 +1,8 @@
 use crate::error::report_error;
 use anyhow::{Context, Result};
-use dashmap::DashMap;
 use bot_db::redis;
 use bot_speech::{speech::initialize_speakers, voicevox::VoicevoxClient};
+use dashmap::DashMap;
 use log::info;
 use sentry::integrations::anyhow::capture_anyhow;
 use serenity::{model::gateway::GatewayIntents, Client};
@@ -10,6 +10,7 @@ use songbird::SerenityInit;
 use tokio::time::Duration;
 
 mod app_state;
+mod autojoin;
 mod command;
 mod component_interaction;
 mod error;
@@ -35,10 +36,14 @@ async fn run() -> Result<()> {
     let config = bot_config::load().await?;
     info!("Config loaded");
 
-    let intents = GatewayIntents::non_privileged() | GatewayIntents::MESSAGE_CONTENT;
+    // Intents: include GUILDS so cache has guild + voice state info
+    let intents = GatewayIntents::GUILDS
+        | GatewayIntents::GUILD_MESSAGES
+        | GatewayIntents::MESSAGE_CONTENT
+        | GatewayIntents::GUILD_VOICE_STATES;
 
     let mut client = Client::builder(config.discord.bot_token, intents)
-        .event_handler(event_handler::Handler)
+        .event_handler(event_handler::Handler::default())
         .application_id(config.discord.client_id)
         .register_songbird()
         .await
@@ -50,6 +55,8 @@ async fn run() -> Result<()> {
             redis_client: redis::Client::open(config.redis.url)?,
             voicevox_client: VoicevoxClient::new(config.voicevox.api_base),
             connected_guild_states: DashMap::new(),
+            preferred_style_id: tokio::sync::RwLock::new(None),
+            time_signal_settings: DashMap::new(),
         },
     )
     .await;
@@ -69,10 +76,6 @@ async fn run() -> Result<()> {
             }
         });
     }
-
-    // Start time signal service
-    tokio::spawn(time_signal::start_time_signal_service());
-    info!("Time signal service started");
 
     info!("Starting client...");
     client.start().await.context("Client error occurred")?;

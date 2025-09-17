@@ -1,8 +1,8 @@
 use crate::regex::{custom_emoji_regex, url_regex};
 use aho_corasick::{AhoCorasickBuilder, MatchKind};
 use anyhow::Result;
-use discord_md::generate::{ToMarkdownString, ToMarkdownStringOption};
 use bot_db::{dict::GetAllOption, redis};
+use discord_md::generate::{ToMarkdownString, ToMarkdownStringOption};
 use serenity::{
     client::Context,
     model::{channel::Message, id::GuildId},
@@ -14,9 +14,9 @@ pub async fn build_read_text(
     conn: &mut redis::aio::Connection,
     guild_id: GuildId,
     msg: &Message,
-    last_msg: &Option<Message>,
+    _last_msg: &Option<Message>,
 ) -> Result<String> {
-    let author_name = build_author_name(ctx, msg).await;
+    let _author_name = build_author_name(ctx, msg).await;
 
     let content = plain_content(ctx, msg);
     let content = replace_custom_emojis(&content);
@@ -39,6 +39,7 @@ pub async fn build_read_text(
     }
 }
 
+#[allow(dead_code)]
 fn should_read_author_name(msg: &Message, last_msg: &Option<Message>) -> bool {
     let last_msg = match last_msg {
         Some(msg) => msg,
@@ -105,59 +106,59 @@ async fn replace_words_on_dict(
 /// 改善されたテキスト処理（仕様書の要求に基づく）
 fn improved_text_processing(text: &str) -> String {
     let mut result = text.to_string();
-    
+
     // URL を省略
     result = regex::Regex::new(r"https?://\S+")
         .unwrap()
         .replace_all(&result, "リンク省略")
         .to_string();
-    
+
     // カスタム絵文字を除去
     result = regex::Regex::new(r"<a?:\w+:\d+>")
         .unwrap()
         .replace_all(&result, "")
         .to_string();
-    
+
     // Unicode絵文字を除去
     result = regex::Regex::new(r":[^:\s]{1,20}:")
         .unwrap()
         .replace_all(&result, "")
         .to_string();
-    
+
     // xaero関連をウェイポイント共有に置換
     result = regex::Regex::new(r"\bxaero[^\s]*")
         .unwrap()
         .replace_all(&result, "ウェイポイント共有")
         .to_string();
-    
+
     // ファイル/画像の言及を除去
     result = regex::Regex::new(r"(?i)(画像|ファイル|画像ファイル)")
         .unwrap()
         .replace_all(&result, "")
         .to_string();
-    
+
     // Discordメンション（@everyone, @here, @user）を除去
     result = regex::Regex::new(r"@\w+")
         .unwrap()
         .replace_all(&result, "")
         .to_string();
-    
+
     // 括弧類を除去
     result = regex::Regex::new(r"[（()（]")
         .unwrap()
         .replace_all(&result, "")
         .to_string();
-    
+
     // 英語の読み上げを改善
     result = improve_english_pronunciation(&result);
-    
+
     result
 }
 
 /// 英語の読み上げを改善（アルファベットをより自然に）
 fn improve_english_pronunciation(text: &str) -> String {
     let mut result = text.to_string();
-    
+
     // 一般的な英単語をカタカナに置換
     let english_replacements = [
         ("hello", "ハロー"),
@@ -193,14 +194,14 @@ fn improve_english_pronunciation(text: &str) -> String {
         ("craft", "クラフト"),
         ("mine", "マイン"),
     ];
-    
+
     for (english, katakana) in english_replacements.iter() {
         result = regex::Regex::new(&format!(r"(?i)\b{}\b", regex::escape(english)))
             .unwrap()
             .replace_all(&result, *katakana)
             .to_string();
     }
-    
+
     // 残った英語の単語を少しマシにする（アルファベット一文字ずつ読まれるのを防ぐ）
     result = regex::Regex::new(r"\b[a-zA-Z]{2,}\b")
         .unwrap()
@@ -210,11 +211,11 @@ fn improve_english_pronunciation(text: &str) -> String {
             if word.len() <= 4 {
                 word.to_string()
             } else {
-                format!("{}、{}", &word[..word.len()/2], &word[word.len()/2..])
+                format!("{}、{}", &word[..word.len() / 2], &word[word.len() / 2..])
             }
         })
         .to_string();
-    
+
     result
 }
 

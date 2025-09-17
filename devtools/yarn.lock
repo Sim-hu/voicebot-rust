@@ -2981,9 +2981,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"koe@workspace:.":
   version: 0.0.0-use.local
-  resolution: "koe@workspace:."
   dependencies:
     "@commitlint/cli": "npm:^18.4.1"
     "@commitlint/config-conventional": "npm:^18.4.0"
