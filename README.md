@@ -2,7 +2,7 @@
 
 # Discord Text-to-Speech Bot
 
-A Discord bot that reads aloud Japanese text chat messages using [VOICEVOX ENGINE](https://github.com/VOICEVOX/voicevox_engine).
+An open-source Discord TTS bot written in Rust. It reads aloud Japanese text chat messages using [VOICEVOX ENGINE](https://github.com/VOICEVOX/voicevox_engine), providing a lightweight self-hosted alternative to existing TTS bots.
 
 ## Features
 

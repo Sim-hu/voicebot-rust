@@ -2,7 +2,7 @@
 
 # Discord 読み上げBot
 
-[VOICEVOX ENGINE](https://github.com/VOICEVOX/voicevox_engine) を使って日本語テキストチャットを読み上げる Discord Bot です。
+Rust で書かれたオープンソースの Discord 読み上げ Bot です。[VOICEVOX ENGINE](https://github.com/VOICEVOX/voicevox_engine) を使って日本語テキストチャットを読み上げます。既存の TTS Bot に代わる、軽量なセルフホスト向けソリューションを目指しています。
 
 ## 特徴
 
