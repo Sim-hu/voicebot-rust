@@ -15,4 +15,7 @@ docs
 docker-compose.yml
 LICENSE
 README.md
+README_JA.md
 .serena
+flake.nix
+flake.lock

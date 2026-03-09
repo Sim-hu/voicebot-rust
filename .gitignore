@@ -12,3 +12,6 @@
 deployment/.env
 .env
 
+# Nix build output
+/result
+

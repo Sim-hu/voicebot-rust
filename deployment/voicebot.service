@@ -1,0 +1,28 @@
+[Unit]
+Description=Discord Text-to-Speech Bot (VOICEVOX)
+After=network-online.target redis.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=voicebot
+Group=voicebot
+EnvironmentFile=/etc/voicebot/env
+ExecStart=/usr/local/bin/bot
+Restart=on-failure
+RestartSec=5
+
+# セキュリティ強化
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+
+[Install]
+WantedBy=multi-user.target
