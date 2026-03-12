@@ -141,6 +141,31 @@ The bot reads configuration from environment variables. If they are not set, it 
 | `/time` | Toggle hourly time announcements |
 | `/help` | Show help information |
 
+## Architecture
+
+```
+Discord message
+    │
+    ▼
+Text processing ── URL/emoji removal, dictionary replacement, 60-char limit
+    │                (crates/bot)
+    ▼
+VOICEVOX API ───── /audio_query → /synthesis
+    │                (crates/bot-speech)
+    ▼
+EncodedAudio
+    │
+    ▼
+FFmpeg ─────────── Convert to PCM (48kHz, mono, 16-bit signed LE)
+    │                (crates/bot-audio)
+    ▼
+DecodedAudio
+    │
+    ▼
+Songbird queue ─── Encode & transmit to Discord voice channel
+                     (crates/bot-call)
+```
+
 ## Project Structure
 
 ```
